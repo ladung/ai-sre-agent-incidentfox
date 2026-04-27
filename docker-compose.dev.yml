@@ -1,0 +1,307 @@
+version: '3.8'
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# IncidentFox — Local Development Stack
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Services:
+#   postgres, config-service, credential-resolver, envoy, sre-agent,
+#   orchestrator, slack-bot, lark-bot
+#
+# Note: slack-bot requires SLACK_BOT_TOKEN and SLACK_APP_TOKEN in .env
+#       If not configured, it will exit gracefully with a warning message
+# Note: lark-bot requires LARK_APP_ID + LARK_APP_SECRET + LARK_TENANT_KEY in .env
+#       (see lark-bot/env.example). orchestrator is required for lark-bot to
+#       dispatch agent investigations.
+#
+# Usage:
+#   make dev        Start all services
+#   make stop       Stop everything
+#   make logs       Follow logs
+#   make clean      Remove containers + volumes
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PostgreSQL — backend for config-service
+  # ─────────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: incidentfox-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: incidentfox
+      POSTGRES_PASSWORD: localdev
+      POSTGRES_DB: incidentfox
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U incidentfox -d incidentfox"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app_network
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Config Service — team config, tokens, audit logging
+  # ─────────────────────────────────────────────────────────────────────────────
+  config-service:
+    build:
+      context: ./config_service
+      dockerfile: Dockerfile
+    container_name: incidentfox-config-service
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/app/scripts/entrypoint-local.sh"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://incidentfox:localdev@postgres:5432/incidentfox?sslmode=disable
+      TOKEN_PEPPER: ${TOKEN_PEPPER:-localdev-pepper-must-be-32-chars-minimum!!}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-local-admin-token}
+      ADMIN_AUTH_MODE: token
+      TEAM_AUTH_MODE: token
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: console
+      ENV_FILE_PATH: /repo/.env  # Path to .env file for write-back
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount config directory for YAML config in local mode
+      - ./config_service/config:/app/config:rw
+      # Mount repo root for .env write-back in local mode
+      # (Mounting entire repo allows atomic file operations)
+      - .:/repo:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_network
+      - default  # Needs host access for port publishing
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Credential Resolver — loads secrets from .env, injects into requests
+  # ─────────────────────────────────────────────────────────────────────────────
+  credential-resolver:
+    build:
+      context: ./sre-agent/credential-proxy
+      dockerfile: Dockerfile
+    container_name: incidentfox-credential-resolver
+    restart: unless-stopped
+    environment:
+      - JWT_MODE=permissive
+      - CONFIG_SERVICE_URL=http://config-service:8080
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8002/health').raise_for_status()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - app_network
+      - default  # Needs external access for LLM proxy to reach upstream APIs
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Envoy Proxy — routes requests, calls credential-resolver for auth headers
+  # ─────────────────────────────────────────────────────────────────────────────
+  envoy:
+    image: envoyproxy/envoy:v1.28-latest
+    container_name: incidentfox-envoy
+    restart: unless-stopped
+    ports:
+      - "8001:8001"  # Proxy endpoint
+      - "9901:9901"  # Admin interface
+    volumes:
+      - ./sre-agent/credential-proxy/envoy/envoy-local.yaml:/etc/envoy/envoy.yaml:ro
+    depends_on:
+      credential-resolver:
+        condition: service_healthy
+    command: ["--config-path", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    networks:
+      - app_network
+      - default  # Needs external access to reach upstream APIs
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # SRE Agent — runs investigations (in-process, no K8s sandboxes)
+  # ─────────────────────────────────────────────────────────────────────────────
+  sre-agent:
+    build:
+      context: ./sre-agent
+      dockerfile: Dockerfile.simple
+    container_name: incidentfox-sre-agent
+    restart: unless-stopped
+    environment:
+      # Proxy mode - no secrets in agent!
+      - ANTHROPIC_BASE_URL=http://envoy:8001
+      - ANTHROPIC_API_KEY=sk-ant-placeholder-proxy-will-inject-real-key
+      # Coralogix routed through proxy (credentials injected)
+      - CORALOGIX_BASE_URL=http://envoy:8001
+      # Config service integration
+      - CONFIG_SERVICE_URL=http://config-service:8080
+      # Tenant context for credential lookup + config loading
+      - INCIDENTFOX_TENANT_ID=local
+      - INCIDENTFOX_TEAM_ID=default
+      # Coralogix config (no API key - injected by proxy)
+      - CORALOGIX_DOMAIN=${CORALOGIX_DOMAIN:-}
+      # GitHub integration (credential-resolver proxies to GitHub API)
+      - GITHUB_BASE_URL=http://credential-resolver:8002/github
+      - CREDENTIAL_RESOLVER_URL=http://credential-resolver:8002
+      - GH_HOST=credential-resolver:8443
+      - GH_TOKEN=local-dev-placeholder
+      # Other services
+      - LMNR_PROJECT_API_KEY=${LMNR_PROJECT_API_KEY:-}
+    depends_on:
+      envoy:
+        condition: service_started
+      config-service:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Note: Cannot use read_only:true because Claude Code CLI needs to write
+    # But we limit writable locations with tmpfs
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=500m
+      - /home/agent/.cache:rw,noexec,nosuid,size=200m
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 100
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "8000:8000"
+    networks:
+      - app_network
+      - default  # Needs external access for API calls
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Orchestrator — webhook router + agent dispatch (used by lark-bot, MS Teams,
+  # Google Chat, GitHub/PagerDuty/Incident.io webhooks). slack-bot still calls
+  # sre-agent directly; lark-bot routes through here.
+  # ─────────────────────────────────────────────────────────────────────────────
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: incidentfox-orchestrator
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://incidentfox:localdev@postgres:5432/incidentfox?sslmode=disable
+      - CONFIG_SERVICE_URL=http://config-service:8080
+      - AGENT_API_URL=http://sre-agent:8000
+      - AI_PIPELINE_API_URL=http://localhost:9999
+      - INVESTIGATE_AUTH_TOKEN=${INVESTIGATE_AUTH_TOKEN:-local-dev-investigate-token}
+      - ORCHESTRATOR_INTERNAL_TOKEN=${ORCHESTRATOR_INTERNAL_TOKEN:-local-dev-internal-token}
+      - ORCHESTRATOR_INTERNAL_ADMIN_TOKEN=${ADMIN_TOKEN:-local-admin-token}
+      - LARK_BOT_INTERNAL_URL=http://lark-bot:8080
+      - LARK_VERIFICATION_TOKEN=${LARK_VERIFICATION_TOKEN:-}
+      - LARK_ENCRYPT_KEY=${LARK_ENCRYPT_KEY:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    ports:
+      - "8070:8070"
+    depends_on:
+      config-service:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=100m
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 100
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app_network
+      - default  # external access for outbound webhook calls
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Slack Bot — connects Slack to SRE Agent
+  # Will exit gracefully if SLACK_BOT_TOKEN and SLACK_APP_TOKEN are not configured
+  # ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Lark Bot — connects Lark (international) to SRE Agent via orchestrator
+  # Requires LARK_APP_ID, LARK_APP_SECRET, LARK_TENANT_KEY in .env
+  # If not configured, it will exit at boot — see lark-bot/env.example
+  # ─────────────────────────────────────────────────────────────────────────────
+  lark-bot:
+    build:
+      context: ./lark-bot
+      dockerfile: Dockerfile
+    container_name: incidentfox-lark-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - LARK_TRANSPORT_MODE=${LARK_TRANSPORT_MODE:-long_connection}
+      - LARK_API_BASE=${LARK_API_BASE:-https://open.larksuite.com}
+      - LARK_OAUTH_ENABLED=false
+      - ORCHESTRATOR_URL=http://orchestrator:8070
+      - CONFIG_SERVICE_URL=http://config-service:8080
+      - INTERNAL_HTTP_PORT=8080
+      - INCIDENTFOX_TEAM_TOKEN=${INCIDENTFOX_TEAM_TOKEN:-${ADMIN_TOKEN:-local-admin-token}}
+      - INCIDENTFOX_ORG_ID=${INCIDENTFOX_ORG_ID:-local}
+      - INCIDENTFOX_TEAM_ID=${INCIDENTFOX_TEAM_ID:-default}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - orchestrator
+      - sre-agent
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Cannot use read_only because app may write logs/temp files
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=100m
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 50
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app_network
+      - default  # Needs external access to connect to Lark
+
+networks:
+  app_network:
+    driver: bridge
+    internal: true  # Internal network for inter-service communication
+  default:
+    driver: bridge  # Default network with external access
+
+volumes:
+  postgres-data:
+    name: incidentfox-postgres-data

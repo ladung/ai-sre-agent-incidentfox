@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any, Protocol
 
 import lark_oapi as lark
@@ -96,10 +97,45 @@ class LarkWsClient:
     async def run(self) -> None:
         """Run the long-connection client until cancelled.
 
-        Captures the running asyncio event loop so that the lark-oapi worker
-        thread can bridge callbacks back into async context via
-        asyncio.run_coroutine_threadsafe.
+        Captures the asyncio event loop on the main thread, then runs lark-oapi's
+        blocking ws.Client.start() inside a dedicated thread that owns its own
+        fresh event loop. The dedicated loop is required because Client.start()
+        internally calls loop.run_until_complete(), which conflicts with the
+        already-running main loop if asyncio.to_thread is used (the worker
+        thread would otherwise inherit / look up the main loop).
+
+        The on_message callback runs on this dedicated thread and bridges back
+        to the main loop via asyncio.run_coroutine_threadsafe.
         """
         self._loop = asyncio.get_running_loop()
         client = self._build_client()
-        await asyncio.to_thread(client.start)
+        done = threading.Event()
+        error: list[BaseException] = []
+
+        def _thread_main() -> None:
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                client.start()
+            except BaseException as e:  # noqa: BLE001 — surface back to caller
+                error.append(e)
+            finally:
+                try:
+                    new_loop.close()
+                except Exception:
+                    pass
+                done.set()
+
+        thread = threading.Thread(target=_thread_main, name="lark-ws", daemon=True)
+        thread.start()
+
+        try:
+            while not done.is_set():
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            # lark-oapi's Client doesn't expose a clean stop API — daemon=True
+            # ensures the thread won't block process exit.
+            raise
+
+        if error:
+            raise error[0]
