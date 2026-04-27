@@ -23,7 +23,7 @@ export DOCKER_BUILDKIT = 0
 export COMPOSE_DOCKER_CLI_BUILD = 0
 endif
 
-.PHONY: dev stop logs logs-agent logs-config logs-orchestrator logs-lark status clean db-shell which-compose
+.PHONY: dev stop logs logs-agent logs-config logs-orchestrator logs-lark logs-web status clean db-shell which-compose
 
 which-compose:
 	@echo "Using compose: $(DC)"
@@ -55,12 +55,16 @@ logs-orchestrator:
 logs-lark:
 	$(DC) -f $(COMPOSE_FILE) logs -f lark-bot
 
+logs-web:
+	$(DC) -f $(COMPOSE_FILE) logs -f web-ui
+
 status:
 	@$(DC) -f $(COMPOSE_FILE) ps
 	@echo ""
 	@curl -sf http://localhost:8080/health > /dev/null 2>&1 && echo "config-service: healthy" || echo "config-service: down"
 	@curl -sf http://localhost:8000/health > /dev/null 2>&1 && echo "sre-agent: healthy" || echo "sre-agent: down"
 	@curl -sf http://localhost:8070/health > /dev/null 2>&1 && echo "orchestrator: healthy" || echo "orchestrator: down"
+	@curl -sf http://localhost:3000 > /dev/null 2>&1 && echo "web-ui: healthy (http://localhost:3000)" || echo "web-ui: down"
 
 clean:
 	$(DC) -f $(COMPOSE_FILE) down -v --remove-orphans

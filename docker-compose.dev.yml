@@ -6,7 +6,7 @@ version: '3.8'
 #
 # Services:
 #   postgres, config-service, credential-resolver, envoy, sre-agent,
-#   orchestrator, slack-bot, lark-bot
+#   orchestrator, slack-bot, lark-bot, web-ui (http://localhost:3000)
 #
 # Note: slack-bot requires SLACK_BOT_TOKEN and SLACK_APP_TOKEN in .env
 #       If not configured, it will exit gracefully with a warning message
@@ -294,6 +294,54 @@ services:
     networks:
       - app_network
       - default  # Needs external access to connect to Lark
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Web UI — IncidentFox admin dashboard (Next.js)
+  # Browse to http://localhost:3000 after the stack is up.
+  # Auth is disabled by default in local dev (no OIDC env vars set).
+  # ─────────────────────────────────────────────────────────────────────────────
+  web-ui:
+    build:
+      context: ./web_ui
+      dockerfile: Dockerfile
+    container_name: incidentfox-web-ui
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - CONFIG_SERVICE_URL=http://config-service:8080
+      - AGENT_SERVICE_URL=http://sre-agent:8000
+      - ORCHESTRATOR_URL=http://orchestrator:8070
+      - ORG_ID=${INCIDENTFOX_ORG_ID:-local}
+      - WEB_UI_PUBLIC_BASE_URL=http://localhost:3000
+      - WEB_UI_OIDC_ENABLED=false
+      - WEB_UI_COOKIE_SECURE=false
+    ports:
+      - "3000:3000"
+    depends_on:
+      config-service:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=100m
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 100
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app_network
+      - default
 
 networks:
   app_network:
