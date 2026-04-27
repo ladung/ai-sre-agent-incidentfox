@@ -10,7 +10,7 @@ from uuid import UUID
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy import text as sql_text
@@ -176,6 +176,22 @@ class AgentRunResponse(BaseModel):
     team_node_id: str
     agent_name: str
     agent_result: dict[str, Any]
+
+
+class DispatchStreamRequest(BaseModel):
+    agent_name: str
+    message: str
+    session_id: str
+    tenant_id: Optional[str] = None
+    team_id: Optional[str] = None
+    correlation_id: Optional[str] = None
+
+
+def _make_sre_agent_streamer(*, base_url: str):
+    """Factory so tests can monkeypatch."""
+    from incidentfox_orchestrator.clients import SreAgentStreamingClient
+
+    return SreAgentStreamingClient(base_url=base_url)
 
 
 def create_app() -> FastAPI:
@@ -2468,6 +2484,39 @@ def create_app() -> FastAPI:
                 ],
             },
         }
+
+    @app.post("/api/v1/agents/dispatch-stream")
+    async def dispatch_stream(req: DispatchStreamRequest, request: Request):
+        """SSE proxy: forward investigation request to sre-agent and stream raw SSE bytes back.
+
+        Used by lark-bot (and other surfaces) to get progressive card update events
+        without buffering the full agent result.
+        """
+        auth = request.headers.get("authorization", "")
+        if not auth.lower().startswith("bearer "):
+            raise HTTPException(status_code=401, detail="missing bearer token")
+        # Resolve sre-agent base URL from environment (avoids requiring full settings
+        # load — which needs DATABASE_URL — in streaming contexts).
+        base_url = (
+            os.environ.get("AGENT_API_URL")
+            or os.environ.get("AGENT_SERVICE_URL")
+            or "http://sre-agent:8000"
+        )
+        streamer = _make_sre_agent_streamer(base_url=base_url)
+
+        def gen():
+            for chunk in streamer.stream_investigate(
+                agent_name=req.agent_name,
+                message=req.message,
+                session_id=req.session_id,
+                tenant_id=req.tenant_id,
+                team_id=req.team_id,
+                correlation_id=req.correlation_id,
+                team_token=auth.split(" ", 1)[1],
+            ):
+                yield chunk
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
 
     return app
 

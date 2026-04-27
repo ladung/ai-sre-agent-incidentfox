@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import AsyncIterator
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import httpx
 
@@ -999,3 +999,43 @@ class CorrelationServiceClient:
                 r = c.get(url)
         r.raise_for_status()
         return dict(r.json())
+
+
+class SreAgentStreamingClient:
+    """Thin streaming client for sre-agent's /investigate SSE endpoint.
+
+    Used by orchestrator's dispatch-stream endpoint to proxy raw SSE bytes through
+    to streaming clients (e.g., lark-bot) without buffering the whole result.
+    """
+
+    def __init__(self, *, base_url: str, timeout: float = 600.0) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._timeout = timeout
+
+    def stream_investigate(
+        self,
+        *,
+        agent_name: str,
+        message: str,
+        session_id: str,
+        team_token: str,
+        tenant_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+    ) -> Iterator[bytes]:
+        body = {
+            "agent_name": agent_name,
+            "message": message,
+            "session_id": session_id,
+            "tenant_id": tenant_id,
+            "team_id": team_id,
+            "correlation_id": correlation_id,
+        }
+        headers = {"Authorization": f"Bearer {team_token}", "Accept": "text/event-stream"}
+        with httpx.Client(timeout=self._timeout) as http:
+            with http.stream(
+                "POST", f"{self._base_url}/investigate", json=body, headers=headers
+            ) as resp:
+                resp.raise_for_status()
+                for chunk in resp.iter_raw():
+                    yield chunk

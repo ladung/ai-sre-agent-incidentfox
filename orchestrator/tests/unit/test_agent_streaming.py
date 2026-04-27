@@ -52,3 +52,35 @@ async def test_stream_agent_skips_keepalives_and_blank_lines():
         team_token="t", agent_name="sre", message="hi", session_id="s"
     )]
     assert events == [{"type": "complete"}]
+
+
+from fastapi.testclient import TestClient
+
+
+def test_dispatch_stream_endpoint_proxies_sre_agent_sse(monkeypatch):
+    from incidentfox_orchestrator.api_server import app
+
+    sse_chunks = [
+        b'data: {"type": "tool_use", "name": "kubectl"}\n\n',
+        b'data: {"type": "complete", "result": "ok"}\n\n',
+    ]
+
+    class FakeSreAgentClient:
+        def stream_investigate(self, **kwargs):
+            for c in sse_chunks:
+                yield c
+
+    # Monkeypatch the sre-agent client factory used by the new endpoint.
+    import incidentfox_orchestrator.api_server as srv
+    monkeypatch.setattr(srv, "_make_sre_agent_streamer", lambda **_: FakeSreAgentClient())
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/agents/dispatch-stream",
+        json={"agent_name": "sre", "message": "hi", "session_id": "lark-x"},
+        headers={"Authorization": "Bearer t"},
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "tool_use" in body
+    assert "complete" in body
