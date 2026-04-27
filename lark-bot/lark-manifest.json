@@ -1,0 +1,28 @@
+{
+  "_comment": "Sample Lark Open Platform app configuration. Apply manually in https://open.larksuite.com/app/<app_id>/dev",
+  "events_v2": [
+    "im.message.receive_v1"
+  ],
+  "scopes": {
+    "tenant": [
+      "im:message",
+      "im:message.group_msg",
+      "im:message:send_as_bot",
+      "im:chat:readonly",
+      "im:resource"
+    ]
+  },
+  "transport": {
+    "options": [
+      {
+        "mode": "webhook",
+        "request_url": "https://<your-orchestrator-host>/webhooks/lark",
+        "encrypt_key_required": true
+      },
+      {
+        "mode": "long_connection",
+        "encrypt_key_required": false
+      }
+    ]
+  }
+}
