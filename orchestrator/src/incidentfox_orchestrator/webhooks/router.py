@@ -3057,3 +3057,12 @@ async def _process_vercel_webhook(request: Request, project_id: str, message: st
             correlation_id=correlation_id,
             error=str(e),
         )
+
+
+# ============================================================================
+# Lark (Feishu) App Webhooks
+# ============================================================================
+
+from incidentfox_orchestrator.webhooks.lark_app import build_lark_router  # noqa: E402
+
+lark_router = build_lark_router()

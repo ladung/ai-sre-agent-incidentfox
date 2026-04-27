@@ -37,6 +37,7 @@ from incidentfox_orchestrator.models import A2ATask, Base, ProvisioningRun
 
 # TeamSlackChannel is deprecated - routing is now handled by Config Service
 from incidentfox_orchestrator.webhooks.router import router as webhook_router
+from incidentfox_orchestrator.webhooks.router import lark_router
 
 
 def _now() -> datetime:
@@ -346,6 +347,9 @@ def create_app() -> FastAPI:
 
     # Register webhook router (all external webhooks: Slack, GitHub, PagerDuty, Incident.io)
     app.include_router(webhook_router)
+    # Lark router registers /webhooks/lark directly (no prefix) so it must be
+    # mounted on the FastAPI app, not on the already-prefixed webhook_router.
+    app.include_router(lark_router)
 
     # Pure ASGI middleware for request ID and logging.
     #
