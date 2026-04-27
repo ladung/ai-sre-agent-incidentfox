@@ -22,6 +22,7 @@ dependencies = [
   "google-auth>=2.37.0",  # Google Chat JWT verification
   "botbuilder-core>=4.15.0",  # MS Teams Bot Framework
   "botbuilder-schema>=4.15.0",  # MS Teams message types
+  "pycryptodome>=3.20",  # AES-256-CBC decryption for Lark webhooks
 ]
 
 [project.optional-dependencies]

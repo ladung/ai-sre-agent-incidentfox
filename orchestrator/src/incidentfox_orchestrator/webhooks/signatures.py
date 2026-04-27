@@ -15,10 +15,15 @@ All verifications use constant-time comparison to prevent timing attacks.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import json
 import time
 from typing import Optional
+
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
 
 
 class SignatureVerificationError(Exception):
@@ -509,3 +514,27 @@ def verify_google_chat_bearer_token(
     except ValueError as e:
         # id_token.verify_oauth2_token raises ValueError for invalid tokens
         raise SignatureVerificationError(f"invalid_token: {e}", "google_chat")
+
+
+def verify_lark_signature(
+    *, timestamp: str, nonce: str, encrypt_key: str, body: str, signature: str
+) -> None:
+    """Lark webhook signature: SHA256(timestamp + nonce + encrypt_key + body) hex digest."""
+    expected = hashlib.sha256((timestamp + nonce + encrypt_key + body).encode()).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise SignatureVerificationError("signature mismatch", "lark")
+
+
+def decrypt_lark_payload(*, encrypted: str, encrypt_key: str) -> dict:
+    """Decrypt Lark's encrypted webhook body. AES-256-CBC, key=SHA256(encrypt_key), IV=first 16 bytes."""
+    try:
+        raw = base64.b64decode(encrypted)
+        if len(raw) < 32:
+            raise ValueError("payload too short")
+        iv, ct = raw[:16], raw[16:]
+        key = hashlib.sha256(encrypt_key.encode()).digest()
+        cipher = AES.new(key, AES.MODE_CBC, iv=iv)
+        plain = unpad(cipher.decrypt(ct), AES.block_size)
+        return json.loads(plain.decode("utf-8"))
+    except Exception as e:
+        raise SignatureVerificationError(f"decrypt failed: {e}", "lark") from e
