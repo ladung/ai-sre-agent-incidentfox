@@ -81,6 +81,16 @@ externalSecrets:
       secretKeyKey: secret_key
       publicKeyRemoteRefKey: incidentfox/prod/langfuse_public_key
       secretKeyRemoteRefKey: incidentfox/prod/langfuse_secret_key
+    # Discord Bot credentials (enable for Discord-based pilot deployments)
+    discordBot:
+      enabled: true
+      secretName: incidentfox-discord-bot
+      botTokenKey: bot_token
+      appIdKey: app_id
+      teamTokenKey: team_token
+      botTokenRemoteRefKey: incidentfox/pilot/discord_bot_token
+      appIdRemoteRefKey: incidentfox/pilot/discord_app_id
+      teamTokenRemoteRefKey: incidentfox/pilot/discord_team_token
     # Lark Bot credentials (enable for Lark-based pilot deployments)
     larkBot:
       enabled: true
@@ -132,6 +142,14 @@ services:
   aiPipelineApi:
     enabled: true
     image: "103002841599.dkr.ecr.us-east-1.amazonaws.com/incidentfox-pilot-ai-pipeline-api:pilot"
+
+  # Discord Bot - Discord integration (enable for Discord-based pilots)
+  discordBot:
+    enabled: true
+    image: "103002841599.dkr.ecr.us-west-2.amazonaws.com/incidentfox/discord-bot:v0.1.0"
+    guildId: "<your-guild-id>"
+    orgId: "<your-org-id>"
+    teamId: "<your-team-id>"
 
   # Lark Bot - Lark/Feishu integration (enable for Lark-based pilots)
   larkBot:

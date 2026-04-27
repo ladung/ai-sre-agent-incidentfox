@@ -1,0 +1,137 @@
+{{- if .Values.services.discordBot.enabled }}
+# =============================================================================
+# Discord Bot - Multi-tenant Discord integration
+# =============================================================================
+# Handles:
+# - Discord gateway events via Discord.py / discord.js bot
+# - Message/mention handling via Discord application commands
+# - Multi-tenant routing via config-service + orchestrator
+# =============================================================================
+{{- if .Values.services.discordBot.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.services.discordBot.serviceAccount.name | default "discord-bot" }}
+  namespace: {{ .Values.namespace }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incidentfox-discord-bot
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: incidentfox-discord-bot
+spec:
+  replicas: {{ .Values.services.discordBot.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: incidentfox-discord-bot
+  template:
+    metadata:
+      labels:
+        app: incidentfox-discord-bot
+    spec:
+      {{- if .Values.services.discordBot.serviceAccount.name }}
+      serviceAccountName: {{ .Values.services.discordBot.serviceAccount.name }}
+      {{- end }}
+      {{- if .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml .Values.global.imagePullSecrets | indent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: discord-bot
+          image: {{ required "services.discordBot.image is required" .Values.services.discordBot.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+{{ toYaml .Values.services.discordBot.resources | indent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: INTERNAL_HTTP_PORT
+              value: "8080"
+            # Orchestrator URL — discord-bot routes ALL agent dispatches through orchestrator
+            # (orchestrator/api_server.py POST /api/v1/agents/dispatch-stream proxies SSE
+            # to sre-agent). discord-bot does NOT call sre-agent directly.
+            - name: ORCHESTRATOR_URL
+              value: {{ printf "http://incidentfox-orchestrator.%s.svc.cluster.local:%d" .Values.namespace (.Values.services.orchestrator.servicePort | int) | quote }}
+            # Config Service (for multi-tenancy)
+            - name: CONFIG_SERVICE_URL
+              value: {{ required "global.configService.url is required" .Values.global.configService.url | quote }}
+            # Tenant identity (for single-tenant / pilot deployments)
+            {{- if .Values.services.discordBot.guildId }}
+            - name: DISCORD_GUILD_ID
+              value: {{ .Values.services.discordBot.guildId | quote }}
+            {{- end }}
+            {{- if .Values.services.discordBot.orgId }}
+            - name: INCIDENTFOX_ORG_ID
+              value: {{ .Values.services.discordBot.orgId | quote }}
+            {{- end }}
+            {{- if .Values.services.discordBot.teamId }}
+            - name: INCIDENTFOX_TEAM_ID
+              value: {{ .Values.services.discordBot.teamId | quote }}
+            {{- end }}
+            {{- if .Values.externalSecrets.contract.discordBot.enabled }}
+            # Discord app credentials
+            - name: DISCORD_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.discordBot.secretName | quote }}
+                  key: {{ .Values.externalSecrets.contract.discordBot.botTokenKey | quote }}
+            - name: DISCORD_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.discordBot.secretName | quote }}
+                  key: {{ .Values.externalSecrets.contract.discordBot.appIdKey | quote }}
+            - name: INCIDENTFOX_TEAM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.discordBot.secretName | quote }}
+                  key: {{ .Values.externalSecrets.contract.discordBot.teamTokenKey | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: {{ .Values.services.discordBot.readinessProbe.initialDelaySeconds | default 5 }}
+            periodSeconds: {{ .Values.services.discordBot.readinessProbe.periodSeconds | default 10 }}
+          {{- if .Values.services.discordBot.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: {{ .Values.services.discordBot.livenessProbe.initialDelaySeconds | default 30 }}
+            periodSeconds: {{ .Values.services.discordBot.livenessProbe.periodSeconds | default 30 }}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: incidentfox-discord-bot
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: incidentfox-discord-bot
+  {{- if .Values.services.discordBot.service.annotations }}
+  annotations:
+{{ toYaml .Values.services.discordBot.service.annotations | indent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.services.discordBot.service.type | default "ClusterIP" }}
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: incidentfox-discord-bot
+{{- end }}
