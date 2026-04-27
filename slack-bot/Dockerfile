@@ -12,7 +12,7 @@ COPY pyproject.toml .
 RUN uv pip install --system -e .
 
 # Copy application code
-COPY *.py .
+COPY *.py ./
 COPY assets/ assets/
 COPY templates/ templates/
 

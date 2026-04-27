@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml .
 RUN uv pip install --system -e .
 
-COPY *.py .
+COPY *.py ./
 
 RUN useradd -m -u 1000 larkbot && chown -R larkbot:larkbot /app
 USER larkbot
