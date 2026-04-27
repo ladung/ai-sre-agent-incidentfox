@@ -5,10 +5,14 @@ version: '3.8'
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Services:
-#   postgres, config-service, credential-resolver, envoy, sre-agent, slack-bot
+#   postgres, config-service, credential-resolver, envoy, sre-agent,
+#   orchestrator, slack-bot, lark-bot
 #
 # Note: slack-bot requires SLACK_BOT_TOKEN and SLACK_APP_TOKEN in .env
 #       If not configured, it will exit gracefully with a warning message
+# Note: lark-bot requires LARK_APP_ID + LARK_APP_SECRET + LARK_TENANT_KEY in .env
+#       (see lark-bot/env.example). orchestrator is required for lark-bot to
+#       dispatch agent investigations.
 #
 # Usage:
 #   make dev        Start all services
@@ -194,6 +198,54 @@ services:
       start_period: 40s
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # Orchestrator — webhook router + agent dispatch (used by lark-bot, MS Teams,
+  # Google Chat, GitHub/PagerDuty/Incident.io webhooks). slack-bot still calls
+  # sre-agent directly; lark-bot routes through here.
+  # ─────────────────────────────────────────────────────────────────────────────
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: incidentfox-orchestrator
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://incidentfox:localdev@postgres:5432/incidentfox?sslmode=disable
+      - CONFIG_SERVICE_URL=http://config-service:8080
+      - AGENT_API_URL=http://sre-agent:8000
+      - AI_PIPELINE_API_URL=http://localhost:9999
+      - INVESTIGATE_AUTH_TOKEN=${INVESTIGATE_AUTH_TOKEN:-local-dev-investigate-token}
+      - ORCHESTRATOR_INTERNAL_TOKEN=${ORCHESTRATOR_INTERNAL_TOKEN:-local-dev-internal-token}
+      - ORCHESTRATOR_INTERNAL_ADMIN_TOKEN=${ADMIN_TOKEN:-local-admin-token}
+      - LARK_BOT_INTERNAL_URL=http://lark-bot:8080
+      - LARK_VERIFICATION_TOKEN=${LARK_VERIFICATION_TOKEN:-}
+      - LARK_ENCRYPT_KEY=${LARK_ENCRYPT_KEY:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    ports:
+      - "8070:8070"
+    depends_on:
+      config-service:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=100m
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 100
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app_network
+      - default  # external access for outbound webhook calls
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Slack Bot — connects Slack to SRE Agent
   # Will exit gracefully if SLACK_BOT_TOKEN and SLACK_APP_TOKEN are not configured
   # ─────────────────────────────────────────────────────────────────────────────
@@ -232,6 +284,52 @@ services:
     networks:
       - app_network
       - default  # Needs external access to connect to Slack
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Lark Bot — connects Lark (international) to SRE Agent via orchestrator
+  # Requires LARK_APP_ID, LARK_APP_SECRET, LARK_TENANT_KEY in .env
+  # If not configured, it will exit at boot — see lark-bot/env.example
+  # ─────────────────────────────────────────────────────────────────────────────
+  lark-bot:
+    build:
+      context: ./lark-bot
+      dockerfile: Dockerfile
+    container_name: incidentfox-lark-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - LARK_TRANSPORT_MODE=${LARK_TRANSPORT_MODE:-long_connection}
+      - LARK_API_BASE=${LARK_API_BASE:-https://open.larksuite.com}
+      - LARK_OAUTH_ENABLED=false
+      - ORCHESTRATOR_URL=http://orchestrator:8070
+      - CONFIG_SERVICE_URL=http://config-service:8080
+      - INTERNAL_HTTP_PORT=8080
+      - INCIDENTFOX_TEAM_TOKEN=${INCIDENTFOX_TEAM_TOKEN:-${ADMIN_TOKEN:-local-admin-token}}
+      - INCIDENTFOX_ORG_ID=${INCIDENTFOX_ORG_ID:-local}
+      - INCIDENTFOX_TEAM_ID=${INCIDENTFOX_TEAM_ID:-default}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - orchestrator
+      - sre-agent
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Cannot use read_only because app may write logs/temp files
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=100m
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 50
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app_network
+      - default  # Needs external access to connect to Lark
 
 networks:
   app_network:
