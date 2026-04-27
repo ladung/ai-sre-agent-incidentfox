@@ -10,12 +10,13 @@ IncidentFox is a multi-tenant AI SRE that investigates production incidents via 
 Slack  → slack-bot (Bolt/Socket Mode) ─→ sre-agent (Claude Agent SDK) → gVisor sandbox
 Web UI ─────────────────────────────────↗        ↕
 Lark   → lark-bot (long-conn or webhook) ─→ orchestrator ─↗
+Discord → discord-bot (Gateway WebSocket) ─→ orchestrator ─↗
                                            credential-proxy (Envoy)
 
-config-service ← used by web_ui, slack-bot, lark-bot, orchestrator, credential-resolver
+config-service ← used by web_ui, slack-bot, lark-bot, discord-bot, orchestrator, credential-resolver
 ```
 
-Three entry points for running agents: **Slack** (via slack-bot), **Lark** (via lark-bot, routed through orchestrator), and **web_ui** (directly). All stream SSE from sre-agent.
+Four entry points for running agents: **Slack** (via slack-bot), **Lark** (via lark-bot, routed through orchestrator), **Discord** (via discord-bot, routed through orchestrator), and **web_ui** (directly). All stream SSE from sre-agent.
 
 **sre-agent** is the active agent. Runs in isolated gVisor K8s sandbox pods — each investigation gets its own sandbox. Uses Claude SDK with 45 skills (progressive knowledge loading) and scripts (Python/Bash integrations). No MCP tools — everything is skills + scripts.
 
@@ -100,6 +101,10 @@ The local stack builds all services from source. Config-service auto-runs alembi
 | lark-bot/ws_client.py | lark-oapi long-connection WebSocket client |
 | lark-bot/http_server.py | FastAPI internal endpoint for orchestrator-forwarded events |
 | lark-bot/investigation_handler.py | Lark investigation lifecycle (post status card, stream, finalize) |
+| discord-bot/app.py | Discord service entry, Gateway connection lifecycle |
+| discord-bot/gateway_client.py | discord.py Bot wiring (on_message, on_reaction_add) |
+| discord-bot/investigation_handler.py | Discord investigation lifecycle (post embed, stream, finalize, add 👍/👎 reactions) |
+| discord-bot/feedback_handler.py | 👍/👎 reaction → config-service feedback POST |
 | orchestrator/src/.../webhooks/lark_app.py | /webhooks/lark — verify signature, decrypt, forward to lark-bot |
 | config_service/src/api/main.py | Config API with hierarchical merge |
 | orchestrator/src/.../webhooks/router.py | Webhook router (GitHub, PagerDuty, Incident.io, Blameless, FireHydrant) |
@@ -130,7 +135,7 @@ The local stack builds all services from source. Config-service auto-runs alembi
 
 ## Architecture decisions pending
 
-1. **Orchestrator integration**: sre-agent currently bypasses orchestrator and talks directly to slack-bot. lark-bot is the first chat surface routed through orchestrator (Phase 1 single-tenant; Phase 2 adds OAuth multi-tenancy). MS Teams and Google Chat webhook entry points already live in orchestrator but lack streaming. slack-bot remains direct-to-agent for now.
+1. **Orchestrator integration**: sre-agent currently bypasses orchestrator and talks directly to slack-bot. lark-bot was the first chat surface routed through orchestrator (Phase 1 single-tenant; Phase 2 adds OAuth multi-tenancy). discord-bot follows the same orchestrator-routed pattern (Phase 1 single-guild; Phase 2 adds slash commands + multi-guild OAuth). MS Teams and Google Chat webhook entry points already live in orchestrator but lack streaming. slack-bot remains direct-to-agent for now.
 2. **Config-driven agents**: Port agent_builder.py pattern to sre-agent so teams can customize agents via config-service.
 3. **Helm cleanup**: `knowledge-base.yaml` template still exists (disabled in all envs). Remove once confirmed no customer uses it.
 
