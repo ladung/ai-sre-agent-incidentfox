@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import AsyncIterator
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -669,6 +670,50 @@ class AgentApiClient:
             "result": result_text,
             "success": result_success,
         }
+
+    async def stream_agent(
+        self,
+        *,
+        team_token: str,
+        agent_name: str,
+        message: str,
+        session_id: str,
+        tenant_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        timeout: float = 600.0,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Async-iterate JSON events from orchestrator's streaming dispatch endpoint."""
+        import json as _json
+
+        body = {
+            "agent_name": agent_name,
+            "message": message,
+            "session_id": session_id,
+            "tenant_id": tenant_id,
+            "team_id": team_id,
+            "correlation_id": correlation_id,
+        }
+        headers = {
+            "Authorization": f"Bearer {team_token}",
+            "Accept": "text/event-stream",
+        }
+        async with httpx.AsyncClient(timeout=timeout) as http:
+            async with http.stream(
+                "POST", f"{self.base_url}/api/v1/agents/dispatch-stream", json=body, headers=headers
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line or line.startswith(":"):
+                        continue
+                    if line.startswith("data:"):
+                        payload = line[len("data:"):].strip()
+                        if not payload:
+                            continue
+                        try:
+                            yield _json.loads(payload)
+                        except _json.JSONDecodeError:
+                            continue
 
 
 class AuditApiClient:
