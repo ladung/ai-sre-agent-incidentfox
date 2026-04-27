@@ -311,6 +311,7 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=3000
+      - HOSTNAME=0.0.0.0
       - CONFIG_SERVICE_URL=http://config-service:8080
       - AGENT_SERVICE_URL=http://sre-agent:8000
       - ORCHESTRATOR_URL=http://orchestrator:8070
