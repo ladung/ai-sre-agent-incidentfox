@@ -28,6 +28,7 @@ on:
           - orchestrator
           - sandbox-router
           - slack-bot
+          - lark-bot
           - ultimate-rag
           - web-ui
           - ai-pipeline
@@ -50,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [agent, config-service, credential-resolver, k8s-gateway, orchestrator, sandbox-router, slack-bot, ultimate-rag, web-ui, ai-pipeline]
+        service: [agent, config-service, credential-resolver, k8s-gateway, orchestrator, sandbox-router, slack-bot, lark-bot, ultimate-rag, web-ui, ai-pipeline]
         include:
           - service: agent
             context: ./sre-agent
@@ -80,6 +81,10 @@ jobs:
             context: ./slack-bot
             dockerfile: ./slack-bot/Dockerfile
             image: incidentfox-slack-bot
+          - service: lark-bot
+            context: ./lark-bot
+            dockerfile: ./lark-bot/Dockerfile
+            image: incidentfox-lark-bot
           - service: ultimate-rag
             context: .
             dockerfile: ./ultimate_rag/Dockerfile
@@ -277,6 +282,7 @@ jobs:
             restart_deployment "incidentfox-ultimate-rag"
             restart_deployment "incidentfox-ai-pipeline"
             restart_deployment "incidentfox-slack-bot"
+            restart_deployment "incidentfox-lark-bot"
           else
             # Restart only the specific service
             case "$SERVICES" in
@@ -286,6 +292,7 @@ jobs:
               k8s-gateway) restart_deployment "incidentfox-k8s-gateway" ;;
               orchestrator) restart_deployment "incidentfox-orchestrator" ;;
               slack-bot) restart_deployment "incidentfox-slack-bot" ;;
+              lark-bot) restart_deployment "incidentfox-lark-bot" ;;
               ultimate-rag) restart_deployment "incidentfox-ultimate-rag" ;;
               web-ui) restart_deployment "incidentfox-web-ui" ;;
             esac
@@ -313,6 +320,7 @@ jobs:
           wait_for_deployment "incidentfox-web-ui"
           wait_for_deployment "incidentfox-k8s-gateway"
           wait_for_deployment "incidentfox-slack-bot"
+          wait_for_deployment "incidentfox-lark-bot"
 
       - name: Wait for RAG services (slow startup)
         run: |
