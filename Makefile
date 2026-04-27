@@ -23,7 +23,7 @@ export DOCKER_BUILDKIT = 0
 export COMPOSE_DOCKER_CLI_BUILD = 0
 endif
 
-.PHONY: dev stop logs logs-agent logs-config logs-orchestrator logs-lark logs-web status clean db-shell which-compose
+.PHONY: dev stop logs logs-agent logs-config logs-orchestrator logs-lark logs-discord logs-web status clean db-shell which-compose
 
 which-compose:
 	@echo "Using compose: $(DC)"
@@ -54,6 +54,9 @@ logs-orchestrator:
 
 logs-lark:
 	$(DC) -f $(COMPOSE_FILE) logs -f lark-bot
+
+logs-discord:
+	$(DC) -f $(COMPOSE_FILE) logs -f discord-bot
 
 logs-web:
 	$(DC) -f $(COMPOSE_FILE) logs -f web-ui

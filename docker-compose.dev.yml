@@ -6,7 +6,7 @@ version: '3.8'
 #
 # Services:
 #   postgres, config-service, credential-resolver, envoy, sre-agent,
-#   orchestrator, slack-bot, lark-bot, web-ui (http://localhost:3000)
+#   orchestrator, slack-bot, lark-bot, discord-bot, web-ui (http://localhost:3000)
 #
 # Note: slack-bot requires SLACK_BOT_TOKEN and SLACK_APP_TOKEN in .env
 #       If not configured, it will exit gracefully with a warning message
@@ -343,6 +343,47 @@ services:
     networks:
       - app_network
       - default
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Discord Bot — connects Discord to SRE Agent via orchestrator
+  # Requires DISCORD_BOT_TOKEN, DISCORD_APP_ID, DISCORD_GUILD_ID in .env
+  # ─────────────────────────────────────────────────────────────────────────────
+  discord-bot:
+    build:
+      context: ./discord-bot
+      dockerfile: Dockerfile
+    container_name: incidentfox-discord-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - ORCHESTRATOR_URL=http://orchestrator:8070
+      - CONFIG_SERVICE_URL=http://config-service:8080
+      - INTERNAL_HTTP_PORT=8080
+      - INCIDENTFOX_TEAM_TOKEN=${INCIDENTFOX_TEAM_TOKEN:-${ADMIN_TOKEN:-local-admin-token}}
+      - INCIDENTFOX_ORG_ID=${INCIDENTFOX_ORG_ID:-local}
+      - INCIDENTFOX_TEAM_ID=${INCIDENTFOX_TEAM_ID:-default}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - orchestrator
+      - sre-agent
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=100m
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 50
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app_network
+      - default  # external access for Discord Gateway WebSocket
 
 networks:
   app_network:
