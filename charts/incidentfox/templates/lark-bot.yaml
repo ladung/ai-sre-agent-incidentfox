@@ -66,15 +66,11 @@ spec:
             # Lark API base URL (larksuite.com for global, feishu.cn for China)
             - name: LARK_API_BASE
               value: {{ .Values.services.larkBot.apiBase | default "https://open.larksuite.com" | quote }}
-            # SRE Agent URL (for investigations)
-            - name: SRE_AGENT_URL
-              value: {{ printf "http://incidentfox-agent.%s.svc.cluster.local:%d" .Values.namespace (.Values.services.agent.servicePort | int) | quote }}
-            # Service-to-service auth for sre-agent /investigate (must match agent's INVESTIGATE_AUTH_TOKEN)
-            - name: INVESTIGATE_AUTH_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.externalSecrets.contract.jwtSecret.secretName | default "incidentfox-jwt-secret" }}
-                  key: {{ .Values.externalSecrets.contract.jwtSecret.investigateAuthTokenKey | default "INVESTIGATE_AUTH_TOKEN" }}
+            # Orchestrator URL — lark-bot routes ALL agent dispatches through orchestrator
+            # (orchestrator/api_server.py POST /api/v1/agents/dispatch-stream proxies SSE
+            # to sre-agent). lark-bot does NOT call sre-agent directly.
+            - name: ORCHESTRATOR_URL
+              value: {{ printf "http://incidentfox-orchestrator.%s.svc.cluster.local:%d" .Values.namespace (.Values.services.orchestrator.servicePort | int) | quote }}
             # Config Service (for multi-tenancy)
             - name: CONFIG_SERVICE_URL
               value: {{ required "global.configService.url is required" .Values.global.configService.url | quote }}

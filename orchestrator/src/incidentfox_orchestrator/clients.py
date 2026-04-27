@@ -1018,7 +1018,6 @@ class SreAgentStreamingClient:
         agent_name: str,
         message: str,
         session_id: str,
-        team_token: str,
         tenant_id: Optional[str] = None,
         team_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
@@ -1031,7 +1030,11 @@ class SreAgentStreamingClient:
             "team_id": team_id,
             "correlation_id": correlation_id,
         }
-        headers = {"Authorization": f"Bearer {team_token}", "Accept": "text/event-stream"}
+        # sre-agent's /investigate validates against INVESTIGATE_AUTH_TOKEN (a
+        # service-to-service secret), not the caller's per-team bearer token.
+        # Mirrors AgentApiClient.run_agent's auth pattern.
+        auth_token = os.getenv("INVESTIGATE_AUTH_TOKEN", "")
+        headers = {"Authorization": f"Bearer {auth_token}", "Accept": "text/event-stream"}
         with httpx.Client(timeout=self._timeout) as http:
             with http.stream(
                 "POST", f"{self._base_url}/investigate", json=body, headers=headers

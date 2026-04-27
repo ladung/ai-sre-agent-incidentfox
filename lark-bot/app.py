@@ -78,14 +78,17 @@ async def _serve(s: Settings) -> None:
 
     tasks: list[asyncio.Task] = []
 
-    if s.transport_mode in {"webhook", "hybrid"}:
-        app = build_app(handler=handler)
-        config = uvicorn.Config(
-            app, host="0.0.0.0", port=s.internal_http_port,
-            log_level=os.environ.get("LOG_LEVEL", "info").lower(),
-        )
-        server = uvicorn.Server(config)
-        tasks.append(asyncio.create_task(server.serve(), name="http_server"))
+    # HTTP server is always started — needed for K8s /healthz probes even in
+    # long_connection mode. The /internal/lark/event endpoint is also harmless
+    # to expose: it only acts on events forwarded by orchestrator's webhook
+    # endpoint, and the lark-bot Service is ClusterIP-only.
+    app = build_app(handler=handler)
+    config = uvicorn.Config(
+        app, host="0.0.0.0", port=s.internal_http_port,
+        log_level=os.environ.get("LOG_LEVEL", "info").lower(),
+    )
+    server = uvicorn.Server(config)
+    tasks.append(asyncio.create_task(server.serve(), name="http_server"))
 
     if s.transport_mode in {"long_connection", "hybrid"}:
         from ws_client import LarkWsClient

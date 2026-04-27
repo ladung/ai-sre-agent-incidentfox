@@ -2516,7 +2516,6 @@ def create_app() -> FastAPI:
                 tenant_id=req.tenant_id,
                 team_id=req.team_id,
                 correlation_id=req.correlation_id,
-                team_token=auth.split(" ", 1)[1],
             ):
                 yield chunk
 
