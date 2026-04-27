@@ -9,12 +9,13 @@ IncidentFox is a multi-tenant AI SRE that investigates production incidents via 
 ```
 Slack  → slack-bot (Bolt/Socket Mode) ─→ sre-agent (Claude Agent SDK) → gVisor sandbox
 Web UI ─────────────────────────────────↗        ↕
+Lark   → lark-bot (long-conn or webhook) ─→ orchestrator ─↗
                                            credential-proxy (Envoy)
 
-config-service ← used by web_ui, slack-bot, orchestrator, credential-resolver
+config-service ← used by web_ui, slack-bot, lark-bot, orchestrator, credential-resolver
 ```
 
-Two entry points for running agents: **Slack** (via slack-bot) and **web_ui** (directly). Both stream SSE from sre-agent.
+Three entry points for running agents: **Slack** (via slack-bot), **Lark** (via lark-bot, routed through orchestrator), and **web_ui** (directly). All stream SSE from sre-agent.
 
 **sre-agent** is the active agent. Runs in isolated gVisor K8s sandbox pods — each investigation gets its own sandbox. Uses Claude SDK with 45 skills (progressive knowledge loading) and scripts (Python/Bash integrations). No MCP tools — everything is skills + scripts.
 
@@ -95,6 +96,11 @@ The local stack builds all services from source. Config-service auto-runs alembi
 | slack-bot/app.py | Main Slack handler (8000+ lines — needs refactoring) |
 | slack-bot/config_client.py | Config service client |
 | slack-bot/modal_builder.py | Interactive modals (103KB) |
+| lark-bot/app.py | Lark service entry; transport-mode dispatch (long-conn vs webhook) |
+| lark-bot/ws_client.py | lark-oapi long-connection WebSocket client |
+| lark-bot/http_server.py | FastAPI internal endpoint for orchestrator-forwarded events |
+| lark-bot/investigation_handler.py | Lark investigation lifecycle (post status card, stream, finalize) |
+| orchestrator/src/.../webhooks/lark_app.py | /webhooks/lark — verify signature, decrypt, forward to lark-bot |
 | config_service/src/api/main.py | Config API with hierarchical merge |
 | orchestrator/src/.../webhooks/router.py | Webhook router (GitHub, PagerDuty, Incident.io, Blameless, FireHydrant) |
 | orchestrator/src/.../output_handlers/ | Post agent results to GitHub PRs/issues |
@@ -124,7 +130,7 @@ The local stack builds all services from source. Config-service auto-runs alembi
 
 ## Architecture decisions pending
 
-1. **Orchestrator integration**: sre-agent currently bypasses orchestrator and talks directly to slack-bot. This blocks non-Slack surfaces (MS Teams, Google Chat — secrets already in staging values). Need to abstract Slack-specific prompts and the file proxy server.
+1. **Orchestrator integration**: sre-agent currently bypasses orchestrator and talks directly to slack-bot. lark-bot is the first chat surface routed through orchestrator (Phase 1 single-tenant; Phase 2 adds OAuth multi-tenancy). MS Teams and Google Chat webhook entry points already live in orchestrator but lack streaming. slack-bot remains direct-to-agent for now.
 2. **Config-driven agents**: Port agent_builder.py pattern to sre-agent so teams can customize agents via config-service.
 3. **Helm cleanup**: `knowledge-base.yaml` template still exists (disabled in all envs). Remove once confirmed no customer uses it.
 
