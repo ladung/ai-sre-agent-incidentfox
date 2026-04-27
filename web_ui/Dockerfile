@@ -5,12 +5,16 @@ FROM base AS deps
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Install platform-specific native binaries based on target architecture
-# TARGETARCH is automatically set by Docker during multi-platform builds (amd64 or arm64)
+# Install platform-specific native binaries based on target architecture.
+# TARGETARCH is set by BuildKit during multi-platform builds. With the legacy
+# builder (DOCKER_BUILDKIT=0), TARGETARCH is empty, so we fall back to
+# detecting the runtime arch via `uname -m`.
 ARG TARGETARCH
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
+RUN ARCH="${TARGETARCH:-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')}"; \
+    echo "Installing native binaries for arch: $ARCH"; \
+    if [ "$ARCH" = "amd64" ]; then \
       npm install @next/swc-linux-x64-gnu lightningcss-linux-x64-gnu @tailwindcss/oxide-linux-x64-gnu --no-save || true; \
-    elif [ "$TARGETARCH" = "arm64" ]; then \
+    elif [ "$ARCH" = "arm64" ]; then \
       npm install @next/swc-linux-arm64-gnu lightningcss-linux-arm64-gnu @tailwindcss/oxide-linux-arm64-gnu --no-save || true; \
     fi
 
