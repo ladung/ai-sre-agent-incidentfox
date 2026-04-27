@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import enum
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -53,6 +54,7 @@ class FeedbackHandler:
             "user_id": str(user_id),
             "reaction": reaction.value,
             "source": "discord",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         try:

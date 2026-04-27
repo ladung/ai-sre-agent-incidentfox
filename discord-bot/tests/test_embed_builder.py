@@ -8,7 +8,6 @@ from embed_builder import (
     build_streaming_embed,
     build_final_embed,
     build_error_embed,
-    embeds_for_long_result,
 )
 
 
@@ -52,15 +51,9 @@ def test_error_embed_includes_error_text():
     assert "orchestrator unreachable" in e["description"]
 
 
-def test_embeds_for_long_result_returns_one_per_chunk():
-    long_result = "p1\n\n" + ("a" * 5000) + "\n\np3"
-    embeds = embeds_for_long_result(prompt="q", result_text=long_result, success=True)
-    # Long result should fan into ≥2 embeds
-    assert len(embeds) >= 2
-    # First embed is the "primary" (header). Continuation embeds carry "(continued)" footer.
-    assert embeds[0].get("footer") is None or "continued" not in embeds[0]["footer"].get("text", "").lower()
-    for e in embeds[1:]:
-        assert "continued" in e["footer"]["text"].lower()
-    # All embeds within 4096
-    for e in embeds:
-        assert len(e["description"]) <= 4096
+def test_final_embed_truncates_long_result():
+    """Phase 1 truncates long results — multi-embed fan-out is deferred to Phase 2."""
+    long_result = "x" * 9000
+    e = build_final_embed(prompt="p", result_text=long_result, success=True)
+    assert len(e["description"]) <= 4096
+    assert "truncated" in e["description"].lower()

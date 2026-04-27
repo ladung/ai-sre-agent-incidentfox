@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
 from embed_builder import (
@@ -28,7 +29,7 @@ class _Discord(Protocol):
 
 
 class _Orchestrator(Protocol):
-    def stream_agent(self, **kwargs): ...
+    def stream_agent(self, **kwargs: Any) -> AsyncIterator[dict[str, Any]]: ...
     async def aclose(self) -> None: ...
 
 

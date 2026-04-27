@@ -37,8 +37,6 @@ def normalize_message(
     # Filter: bot's own messages
     if getattr(message.author, "id", None) == bot_user_id:
         return None
-    if getattr(message.author, "bot", False) is True and message.author.id == bot_user_id:
-        return None
 
     # Filter: outside bound guild
     if bound_guild_id is not None and getattr(message.guild, "id", None) != bound_guild_id:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from markdown_utils import escape_discord_md, split_for_embed_chunks, to_discord_md
+from markdown_utils import escape_discord_md, to_discord_md
 
 COLOR_BLUE = 0x3498DB    # 3447003
 COLOR_GREEN = 0x2ECC71   # 3066993
@@ -17,7 +17,7 @@ DESCRIPTION_SAFE_LIMIT = 4000
 def _truncate(text: str, *, limit: int = DESCRIPTION_HARD_LIMIT) -> str:
     if len(text) <= limit:
         return text
-    suffix = "\n…(truncated, more coming)"
+    suffix = "\n…(truncated — Phase 2 will add multi-embed fan-out)"
     return text[: limit - len(suffix)] + suffix
 
 
@@ -62,29 +62,6 @@ def build_error_embed(*, prompt: str, error: str) -> EmbedDict:
     }
 
 
-def embeds_for_long_result(
-    *, prompt: str, result_text: str, success: bool
-) -> list[EmbedDict]:
-    """Build one or more embeds for a final result that may exceed 4096 chars.
-
-    First embed is the primary (with question + first chunk). Subsequent embeds
-    are continuation chunks tagged with a 'continued' footer.
-    """
-    safe_prompt = escape_discord_md(prompt)
-    body = to_discord_md(result_text)
-    chunks = split_for_embed_chunks(body, max_chars=DESCRIPTION_SAFE_LIMIT - 200)
-
-    primary = {
-        "title": "Investigation Complete" if success else "Investigation Failed",
-        "description": f"**Question**\n\n> {safe_prompt}\n\n---\n\n{chunks[0]}",
-        "color": COLOR_GREEN if success else COLOR_RED,
-    }
-    embeds: list[EmbedDict] = [primary]
-    for i, chunk in enumerate(chunks[1:], start=2):
-        embeds.append({
-            "title": "Investigation (continued)",
-            "description": chunk,
-            "color": COLOR_GREEN if success else COLOR_RED,
-            "footer": {"text": f"continued · part {i}/{len(chunks)}"},
-        })
-    return embeds
+# Note: multi-embed fan-out (`embeds_for_long_result`) is deferred to Phase 2 since
+# the InvestigationHandler currently uses single-embed `edit_embed` for progressive
+# updates. Long results are truncated by `_truncate()` above. See spec section 7.
