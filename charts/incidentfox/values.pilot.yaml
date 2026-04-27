@@ -81,6 +81,22 @@ externalSecrets:
       secretKeyKey: secret_key
       publicKeyRemoteRefKey: incidentfox/prod/langfuse_public_key
       secretKeyRemoteRefKey: incidentfox/prod/langfuse_secret_key
+    # Lark Bot credentials (enable for Lark-based pilot deployments)
+    larkBot:
+      enabled: true
+      secretName: incidentfox-lark-bot
+      appIdKey: app_id
+      appSecretKey: app_secret
+      verificationTokenKey: verification_token
+      encryptKeyKey: encrypt_key
+      tenantKeyKey: tenant_key
+      teamTokenKey: team_token
+      appIdRemoteRefKey: incidentfox/pilot/lark_app_id
+      appSecretRemoteRefKey: incidentfox/pilot/lark_app_secret
+      verificationTokenRemoteRefKey: incidentfox/pilot/lark_verification_token
+      encryptKeyRemoteRefKey: incidentfox/pilot/lark_encrypt_key
+      tenantKeyRemoteRefKey: incidentfox/pilot/lark_tenant_key
+      teamTokenRemoteRefKey: incidentfox/pilot/lark_team_token
 
 services:
   configService:
@@ -116,6 +132,14 @@ services:
   aiPipelineApi:
     enabled: true
     image: "103002841599.dkr.ecr.us-east-1.amazonaws.com/incidentfox-pilot-ai-pipeline-api:pilot"
+
+  # Lark Bot - Lark/Feishu integration (enable for Lark-based pilots)
+  larkBot:
+    enabled: true
+    image: "103002841599.dkr.ecr.us-east-1.amazonaws.com/incidentfox-pilot-lark-bot:pilot"
+    transportMode: long_connection
+    orgId: "<customer-org-id>"
+    teamId: "<customer-team-id>"
 
   # RAPTOR Knowledge Base - disabled until infrastructure is set up
   knowledgeBase:

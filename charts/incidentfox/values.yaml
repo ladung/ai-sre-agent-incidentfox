@@ -151,6 +151,22 @@ externalSecrets:
       secretName: incidentfox-shared-anthropic
       secretKey: ANTHROPIC_API_KEY
       remoteRefKey: incidentfox/prod/shared_anthropic_api_key
+    # Lark Bot credentials (app_id, app_secret, verification_token, encrypt_key, tenant_key, team_token)
+    larkBot:
+      enabled: false
+      secretName: incidentfox-lark-bot
+      appIdKey: app_id
+      appSecretKey: app_secret
+      verificationTokenKey: verification_token
+      encryptKeyKey: encrypt_key
+      tenantKeyKey: tenant_key
+      teamTokenKey: team_token
+      appIdRemoteRefKey: incidentfox/prod/lark_app_id
+      appSecretRemoteRefKey: incidentfox/prod/lark_app_secret
+      verificationTokenRemoteRefKey: incidentfox/prod/lark_verification_token
+      encryptKeyRemoteRefKey: incidentfox/prod/lark_encrypt_key
+      tenantKeyRemoteRefKey: incidentfox/prod/lark_tenant_key
+      teamTokenRemoteRefKey: incidentfox/prod/lark_team_token
     # Slack Bot OAuth credentials (for multi-workspace distribution)
     slackBot:
       enabled: false
@@ -403,6 +419,41 @@ services:
     slack:
       agentMaxTurns: 50         # Max tool calls per run (enterprise: 30-100)
       agentTimeoutSeconds: 180  # 3 minutes (enterprise: 2-5 min)
+
+  # Lark Bot - Multi-tenant Lark/Feishu integration
+  larkBot:
+    enabled: false
+    image: "incidentfox/lark-bot:v0.1.0"
+    replicas: 1
+    servicePort: 8080
+    # Transport mode: long_connection (persistent WebSocket) or webhook (HTTP callbacks)
+    transportMode: long_connection
+    # API base URL: https://open.larksuite.com (global) or https://open.feishu.cn (China)
+    apiBase: https://open.larksuite.com
+    # Tenant identity (for single-tenant / pilot deployments; leave empty for multi-tenant)
+    orgId: ""
+    teamId: ""
+    serviceAccount:
+      create: true
+      name: lark-bot
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+    readinessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    livenessProbe:
+      enabled: true
+      initialDelaySeconds: 30
+      periodSeconds: 30
+    # Service configuration
+    service:
+      type: ClusterIP
+      annotations: {}
 
   # Slack Bot - Multi-tenant Slack integration
   slackBot:

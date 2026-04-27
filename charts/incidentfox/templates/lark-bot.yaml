@@ -1,0 +1,169 @@
+{{- if .Values.services.larkBot.enabled }}
+# =============================================================================
+# Lark Bot - Multi-tenant Lark/Feishu integration
+# =============================================================================
+# Handles:
+# - Lark event subscriptions (long connection or webhook mode)
+# - Message/mention handling via Lark bot framework
+# - Multi-tenant routing via config-service + orchestrator
+# =============================================================================
+{{- if .Values.services.larkBot.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.services.larkBot.serviceAccount.name | default "lark-bot" }}
+  namespace: {{ .Values.namespace }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incidentfox-lark-bot
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: incidentfox-lark-bot
+spec:
+  replicas: {{ .Values.services.larkBot.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: incidentfox-lark-bot
+  template:
+    metadata:
+      labels:
+        app: incidentfox-lark-bot
+    spec:
+      {{- if .Values.services.larkBot.serviceAccount.name }}
+      serviceAccountName: {{ .Values.services.larkBot.serviceAccount.name }}
+      {{- end }}
+      {{- if .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml .Values.global.imagePullSecrets | indent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: lark-bot
+          image: {{ required "services.larkBot.image is required" .Values.services.larkBot.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.services.larkBot.servicePort | default 8080 }}
+              name: http
+          resources:
+{{ toYaml .Values.services.larkBot.resources | indent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            # Lark transport mode: long_connection (persistent socket) or webhook (HTTP)
+            - name: LARK_TRANSPORT_MODE
+              value: {{ .Values.services.larkBot.transportMode | default "long_connection" | quote }}
+            - name: PORT
+              value: {{ .Values.services.larkBot.servicePort | default 8080 | quote }}
+            # Lark API base URL (larksuite.com for global, feishu.cn for China)
+            - name: LARK_API_BASE
+              value: {{ .Values.services.larkBot.apiBase | default "https://open.larksuite.com" | quote }}
+            # SRE Agent URL (for investigations)
+            - name: SRE_AGENT_URL
+              value: {{ printf "http://incidentfox-agent.%s.svc.cluster.local:%d" .Values.namespace (.Values.services.agent.servicePort | int) | quote }}
+            # Service-to-service auth for sre-agent /investigate (must match agent's INVESTIGATE_AUTH_TOKEN)
+            - name: INVESTIGATE_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.jwtSecret.secretName | default "incidentfox-jwt-secret" }}
+                  key: {{ .Values.externalSecrets.contract.jwtSecret.investigateAuthTokenKey | default "INVESTIGATE_AUTH_TOKEN" }}
+            # Config Service (for multi-tenancy)
+            - name: CONFIG_SERVICE_URL
+              value: {{ required "global.configService.url is required" .Values.global.configService.url | quote }}
+            - name: CONFIG_SERVICE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.configService.secretName | quote }}
+                  key: {{ .Values.externalSecrets.contract.configService.adminTokenKey | quote }}
+            # Tenant identity (for single-tenant / pilot deployments)
+            {{- if .Values.services.larkBot.orgId }}
+            - name: INCIDENTFOX_ORG_ID
+              value: {{ .Values.services.larkBot.orgId | quote }}
+            {{- end }}
+            {{- if .Values.services.larkBot.teamId }}
+            - name: INCIDENTFOX_TEAM_ID
+              value: {{ .Values.services.larkBot.teamId | quote }}
+            {{- end }}
+            {{- if .Values.externalSecrets.contract.larkBot.enabled }}
+            # Lark app credentials
+            - name: LARK_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.larkBot.secretName | quote }}
+                  key: {{ .Values.externalSecrets.contract.larkBot.appIdKey | quote }}
+            - name: LARK_APP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.larkBot.secretName | quote }}
+                  key: {{ .Values.externalSecrets.contract.larkBot.appSecretKey | quote }}
+            - name: LARK_VERIFICATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.larkBot.secretName | quote }}
+                  key: {{ .Values.externalSecrets.contract.larkBot.verificationTokenKey | quote }}
+            - name: LARK_ENCRYPT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.larkBot.secretName | quote }}
+                  key: {{ .Values.externalSecrets.contract.larkBot.encryptKeyKey | quote }}
+                  optional: true
+            - name: LARK_TENANT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.larkBot.secretName | quote }}
+                  key: {{ .Values.externalSecrets.contract.larkBot.tenantKeyKey | quote }}
+            - name: INCIDENTFOX_TEAM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.larkBot.secretName | quote }}
+                  key: {{ .Values.externalSecrets.contract.larkBot.teamTokenKey | quote }}
+            {{- end }}
+            # Web UI URL for links in Lark messages
+            {{- if .Values.global.webUiUrl }}
+            - name: WEB_UI_URL
+              value: {{ .Values.global.webUiUrl | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.services.larkBot.servicePort | default 8080 }}
+            initialDelaySeconds: {{ .Values.services.larkBot.readinessProbe.initialDelaySeconds | default 5 }}
+            periodSeconds: {{ .Values.services.larkBot.readinessProbe.periodSeconds | default 10 }}
+          {{- if .Values.services.larkBot.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.services.larkBot.servicePort | default 8080 }}
+            initialDelaySeconds: {{ .Values.services.larkBot.livenessProbe.initialDelaySeconds | default 30 }}
+            periodSeconds: {{ .Values.services.larkBot.livenessProbe.periodSeconds | default 30 }}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: incidentfox-lark-bot
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: incidentfox-lark-bot
+  {{- if .Values.services.larkBot.service.annotations }}
+  annotations:
+{{ toYaml .Values.services.larkBot.service.annotations | indent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.services.larkBot.service.type | default "ClusterIP" }}
+  ports:
+    - port: {{ .Values.services.larkBot.servicePort | default 8080 }}
+      targetPort: {{ .Values.services.larkBot.servicePort | default 8080 }}
+      protocol: TCP
+      name: http
+  selector:
+    app: incidentfox-lark-bot
+{{- end }}
