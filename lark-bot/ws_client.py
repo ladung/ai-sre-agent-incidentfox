@@ -115,6 +115,14 @@ class LarkWsClient:
         def _thread_main() -> None:
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(new_loop)
+            # lark-oapi captures the event loop at module-import time as a
+            # module-level global (lark_oapi.ws.client.loop). When this module
+            # is imported inside a uvicorn process, that capture binds to the
+            # main thread's running loop, which then conflicts with start()'s
+            # run_until_complete from any other thread. Override the cached
+            # global with our thread-local loop.
+            from lark_oapi.ws import client as _lark_ws_client
+            _lark_ws_client.loop = new_loop
             try:
                 client.start()
             except BaseException as e:  # noqa: BLE001 — surface back to caller

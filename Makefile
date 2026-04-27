@@ -9,39 +9,61 @@
 #   make logs       Follow all logs
 #   make clean      Remove containers, volumes, and images
 #   make db-shell   Open psql shell
+#
+# Compose tool detection:
+#   Auto-detects `docker compose` v2 (preferred) and falls back to v1
+#   `docker-compose`. With v1, BuildKit is disabled so its image-config
+#   parser doesn't crash on BuildKit OCI metadata (KeyError: 'ContainerConfig').
 
-.PHONY: dev stop logs logs-agent logs-config logs-orchestrator logs-lark status clean db-shell
+DC := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
+COMPOSE_FILE ?= docker-compose.yml
+
+ifeq ($(DC),docker-compose)
+export DOCKER_BUILDKIT = 0
+export COMPOSE_DOCKER_CLI_BUILD = 0
+endif
+
+.PHONY: dev stop logs logs-agent logs-config logs-orchestrator logs-lark status clean db-shell which-compose
+
+which-compose:
+	@echo "Using compose: $(DC)"
+	@echo "Compose file:  $(COMPOSE_FILE)"
+ifeq ($(DC),docker-compose)
+	@echo "BuildKit:      disabled (v1 compatibility)"
+else
+	@echo "BuildKit:      enabled"
+endif
 
 dev:
-	docker compose up -d --build
+	$(DC) -f $(COMPOSE_FILE) up -d --build
 
 stop:
-	docker compose down
+	$(DC) -f $(COMPOSE_FILE) down
 
 logs:
-	docker compose logs -f
+	$(DC) -f $(COMPOSE_FILE) logs -f
 
 logs-agent:
-	docker compose logs -f sre-agent
+	$(DC) -f $(COMPOSE_FILE) logs -f sre-agent
 
 logs-config:
-	docker compose logs -f config-service
+	$(DC) -f $(COMPOSE_FILE) logs -f config-service
 
 logs-orchestrator:
-	docker compose logs -f orchestrator
+	$(DC) -f $(COMPOSE_FILE) logs -f orchestrator
 
 logs-lark:
-	docker compose logs -f lark-bot
+	$(DC) -f $(COMPOSE_FILE) logs -f lark-bot
 
 status:
-	@docker compose --profile slack ps
+	@$(DC) -f $(COMPOSE_FILE) ps
 	@echo ""
 	@curl -sf http://localhost:8080/health > /dev/null 2>&1 && echo "config-service: healthy" || echo "config-service: down"
 	@curl -sf http://localhost:8000/health > /dev/null 2>&1 && echo "sre-agent: healthy" || echo "sre-agent: down"
 	@curl -sf http://localhost:8070/health > /dev/null 2>&1 && echo "orchestrator: healthy" || echo "orchestrator: down"
 
 clean:
-	docker compose --profile slack down -v --remove-orphans
+	$(DC) -f $(COMPOSE_FILE) down -v --remove-orphans
 
 db-shell:
-	docker compose exec postgres psql -U incidentfox -d incidentfox
+	$(DC) -f $(COMPOSE_FILE) exec postgres psql -U incidentfox -d incidentfox
