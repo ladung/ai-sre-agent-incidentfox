@@ -132,3 +132,4 @@ This integration is currently for Lark international (`larksuite.com`) only. Fei
 - [Slack Setup](SLACK_SETUP.md) — Set up IncidentFox in Slack
 - [MS Teams Setup](TEAMS_SETUP.md) — Set up IncidentFox in Microsoft Teams
 - [Google Chat Setup](GOOGLE_CHAT_SETUP.md) — Set up IncidentFox in Google Chat
+- [Discord Setup](DISCORD_SETUP.md) — Set up IncidentFox in Discord
