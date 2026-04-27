@@ -162,6 +162,21 @@ spec:
                   name: {{ .Values.externalSecrets.contract.teams.secretName | quote }}
                   key: {{ .Values.externalSecrets.contract.teams.tenantIdKey | quote }}
             {{- end }}
+            {{- if .Values.services.larkBot.enabled }}
+            - name: LARK_BOT_INTERNAL_URL
+              value: "http://incidentfox-lark-bot.{{ .Values.namespace }}.svc.cluster.local:8080"
+            - name: LARK_VERIFICATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.larkBot.secretName | quote }}
+                  key: {{ .Values.externalSecrets.contract.larkBot.verificationTokenKey | quote }}
+            - name: LARK_ENCRYPT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalSecrets.contract.larkBot.secretName | quote }}
+                  key: {{ .Values.externalSecrets.contract.larkBot.encryptKeyKey | quote }}
+                  optional: true
+            {{- end }}
             {{- if .Values.externalSecrets.vercel.enabled }}
             - name: VERCEL_WEBHOOK_SECRET
               valueFrom:
