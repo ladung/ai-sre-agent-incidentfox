@@ -129,3 +129,4 @@ If IncidentFox acknowledges your message but doesn't return results, your observ
 - [Connect your observability tools](INTEGRATIONS.md)
 - [Google Chat Setup](GOOGLE_CHAT_SETUP.md) - Set up IncidentFox in Google Chat
 - [Slack Setup](SLACK_SETUP.md) - Set up IncidentFox in Slack
+- [Lark Setup](LARK_SETUP.md) - Set up IncidentFox in Lark
